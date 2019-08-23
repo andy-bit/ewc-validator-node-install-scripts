@@ -10,7 +10,7 @@ See our Atlassian wiki for [installation instructions](https://energyweb.atlassi
 
 One can run the script with `--auto` parameter for testing (DO NOT USE FOR YOUR INSTALLATION) which can be used to take default for node-name and generate a random key.
 
-The final machine will end-up with three docker virtual machines, *parity*, *parity-telemetry* and *node-control* but in the case node-control is not needed or if the case node-control needs to be disabled from the beginning, one can run the script with the `--v-energy-validator-node` parameter.
+The final machine will end-up with three docker virtual machines, *parity*, *parity-telemetry* and *node-control* but in the case node-control is not needed or if the case node-control needs to be disabled from the beginning, one can run the script with the `--without-nodecontrol` parameter.
 
 ## Shared secrets
 
