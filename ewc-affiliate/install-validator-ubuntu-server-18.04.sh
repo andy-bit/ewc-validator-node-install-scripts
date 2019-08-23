@@ -9,8 +9,10 @@ DEBIAN_FRONTEND=noninteractive
 PARITY_VERSION="parity/parity:v2.5.6-stable"
 PARITY_CHKSUM="sha256:8886ee3bce3c5b768e5b39344f0f9c1390eb00e7fd1795c997651ad440445b65"
 
-NODECONTROL_VERSION="v1.0.0"
-NODECONTROL_CHKSUM="sha256:c23d3f66f1c7861c43ba1fe900eb734bcab7e2352f34b51db91beb6f3d757c35"
+if [[ "$1" != "--without-nodecontrol" && "$2" != "--without-nodecontrol" ]]; then
+  NODECONTROL_VERSION="v1.0.0"
+  NODECONTROL_CHKSUM="sha256:c23d3f66f1c7861c43ba1fe900eb734bcab7e2352f34b51db91beb6f3d757c35"
+fi
 
 PARITYTELEMETRY_VERSION="1.1.0"
 PARITYTELEMETRY_CHKSUM="sha256:00e3a14c5e9c6629eedfcece86e12599f5813c0f2fc075689efa1233aa0cfef7"
@@ -23,6 +25,9 @@ BLOCK_GAS="8000000"
 CHAINNAME="EnergyWebChain"
 CHAINSPEC_URL="https://raw.githubusercontent.com/energywebfoundation/ewf-chainspec/master/EnergyWebChain.json"
 KEY_SEED="0x$(openssl rand -hex 32)"
+
+# Generate random account password to be used if no password given
+PASSWORD="$(openssl rand -hex 32)"
 
 # Make sure locales are properly set and generated
 apt-get update -y
@@ -54,7 +59,7 @@ apt-get install -y curl net-tools dnsutils expect jq iptables-persistent debsums
 EXTERNAL_IP="$(dig @resolver1.opendns.com ANY myip.opendns.com +short)"
 COMPANY_NAME="validator-$EXTERNAL_IP"
 
-if [ ! "$1" == "--auto" ];
+if [[ "$1" != "--auto" && "$2" != "--auto" ]];
 then
 # Show a warning that SSH login is restriced after install finishes
 whiptail --backtitle="EWF Genesis Node Installer" --title "Warning" --yes-button "Continue" --no-button "Abort" --yesno "After the installation is finished you can only login through SSH with the current user on port 2222 and the key provided in the next steps." 10 60
@@ -64,11 +69,14 @@ whiptail --backtitle="EWF Genesis Node Installer" --title "Confirm Home Director
 
 COMPANY_NAME=$(whiptail --backtitle="EWF Genesis Node Installer" --inputbox "Enter Affiliate/Company Name (will be cut to 30 chars)" 8 78 $COMPANY_NAME --title "Node Configuration" 3>&1 1>&2 2>&3)
 KEY_SEED=$(whiptail --backtitle="EWF Genesis Node Installer" --inputbox "Enter Validator account seed (32byte hex with 0x)" 8 78 $KEY_SEED --title "Node Configuration" 3>&1 1>&2 2>&3)
+PASSWORD=$(whiptail --backtitle="EWF Genesis Node Installer" --inputbox "Enter Validator password/passphrase to encrypt your account with (32byte max)" 8 78 $PASSWORD --title "Node Configuration"  3>&1 1>&2 2>&3)
 EXTERNAL_IP=$(whiptail --backtitle="EWF Genesis Node Installer" --inputbox "Enter this hosts public IP" 8 78 $EXTERNAL_IP --title "Connectivity" 3>&1 1>&2 2>&3)
 NETIF=$(whiptail --backtitle="EWF Genesis Node Installer" --inputbox "Enter this hosts primary network interface" 8 78 $NETIF --title "Connectivity" 3>&1 1>&2 2>&3)
 fi
 
 COMPANY_NAME=$(echo $COMPANY_NAME | cut -c -30)
+PASSWORD=$(echo $PASSWORD | cut -c -64)
+if [ ${#PASSWORD} -lt 16 ]; then echo "Password to short, try again"; exit -1; fi
 
 # Declare a main function. This way we can put all other functions (especially the assert writers) to the bottom.
 main() {
@@ -142,11 +150,13 @@ if [ "$PARITY_CHKSUM" != "$IMGHASH" ]; then
   exit -1;
 fi
 
+if [[ "$1" != "--without-nodecontrol" && "$2" != "--without-nodecontrol" ]]; then
 docker pull energyweb/nodecontrol:$NODECONTROL_VERSION
 IMGHASH="$(docker image inspect energyweb/nodecontrol:$NODECONTROL_VERSION|jq -r '.[0].Id')"
 if [ "$NODECONTROL_CHKSUM" != "$IMGHASH" ]; then
   echo "ERROR: Unable to verify nodecontrol docker image. Checksum missmatch."
   exit -1;
+fi
 fi
 
 docker pull energyweb/parity-telemetry:$PARITYTELEMETRY_VERSION
@@ -179,14 +189,14 @@ wget $CHAINSPEC_URL -O config/chainspec.json
 
 echo "Creating Account..."
 
-# Generate random account password and store
+# Store the generated random account password or account password entered by the user
 XPATH="$(pwd)"
-PASSWORD="$(openssl rand -hex 32)"
 echo "$PASSWORD" > .secret
 chmod 400 .secret
 chown 1000:1000 .secret
 
 # Launch oneshot docker
+echo "Launching oneshot docker for account creation"
 docker run -d --name parity-keygen \
     -p 127.0.0.1:8545:8545 \
     -v ${XPATH}/chain-data/:/home/parity/.local/share/io.parity.ethereum/ \
@@ -196,7 +206,7 @@ docker run -d --name parity-keygen \
 # Wait for parity to sort itself out
 sleep 20
 
-generate_account_data() 
+generate_account_data()
 {
 cat << EOF
 { "method": "parity_newAccountFromSecret", "params": ["$KEY_SEED","$PASSWORD"], "id": 1, "jsonrpc": "2.0" }
@@ -209,11 +219,20 @@ echo "Account created: $ADDR"
 INFLUX_USER="$(echo $ADDR | cut -c -20)"
 INFLUX_PASS="$(openssl rand -hex 16)"
 
+# Prepare Log File(s)
+touch ../parity-log.txt && chmod 777 ../parity-log.txt
+touch ../parity-telemetry-log.txt && chmod 777 ../parity-telemetry-log.txt
+if [[ "$1" != "--without-nodecontrol" && "$2" != "--without-nodecontrol" ]]; then
+  touch ../nodecontrol-log.txt && chmod 777 ../nodecontrol-log.txt
+fi
+
 # got the key now discard of the parity instance
 docker stop parity-keygen
 docker rm -f parity-keygen
 
-PARITY_KEY_FILE="$(ls -1 ./chain-data/keys/$CHAINNAME/|grep UTC|head -n1)"
+if [[ "$1" != "--without-nodecontrol" && "$2" != "--without-nodecontrol" ]]; then
+  PARITY_KEY_FILE="$(ls -1 ./chain-data/keys/$CHAINNAME/|grep UTC|head -n1)"
+fi
 
 cat >> config/parity-signing.toml << EOF
 engine_signer = "$ADDR"
@@ -230,6 +249,10 @@ chown telegraf /var/spool/parity.sock
 touch config/nc-lastblock.txt
 # Write the docker-compose file to disk
 writeDockerCompose
+# Write nodecontrol end part of the docker-compose file to disk
+if [[ "$1" != "--without-nodecontrol" && "$2" != "--without-nodecontrol" ]]; then
+  appendDockerComposeNodecontrol
+fi
 
 # start everything up
 docker-compose up -d
@@ -272,7 +295,7 @@ wget https://downloads.cisofy.com/lynis/lynis-2.7.1.tar.gz
 tar xvzf lynis-2.7.1.tar.gz
 mv lynis /usr/local/
 ln -s /usr/local/lynis/lynis /usr/local/bin/lynis
-lynis audit system 
+lynis audit system
 
 
 # Print install summary
@@ -291,7 +314,7 @@ cat install-summary.txt
 }
 
 ## Files that get created
-      
+
 
 writeDockerCompose() {
 cat > docker-compose.yml << 'EOF'
@@ -303,40 +326,30 @@ services:
     command:
       --config /parity/config/parity-${IS_SIGNING}.toml
       --nat extip:${EXTERNAL_IP}
+      --log-file=/parity/parity-log.txt
     volumes:
+      - ../parity-log.txt:/parity/parity-log.txt
       - ./config:/parity/config:ro
       - ./chain-data:/home/parity/.local/share/io.parity.ethereum/
       - ./.secret:/parity/authority.pwd:ro
     ports:
-      - 30303:30303 
+      - 30303:30303
       - 30303:30303/udp
       - 127.0.0.1:8545:8545
 
-  nodecontrol:
-    image: energyweb/nodecontrol:${NODECONTROL_VERSION}
-    restart: always
-    volumes:
-      - $PWD:$PWD
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./config/nc-lastblock.txt:/lastblock.txt
-      - $PARITY_KEY_FILE:/paritykey:ro
-    environment:
-      - CONTRACT_ADDRESS=0x1204700000000000000000000000000000000007
-      - STACK_PATH=$PWD
-      - RPC_ENDPOINT=http://parity:8545
-      - VALIDATOR_ADDRESS=${VALIDATOR_ADDRESS}
-      - BLOCKFILE_PATH=/lastblock.txt
-      - KEYFILE_PATH=/paritykey
-
   parity-telemetry:
     image: energyweb/parity-telemetry:${PARITYTELEMETRY_VERSION}
+    command:
+      sh -c 'node src/index.js | tee /parity-telemetry-log.txt'
     restart: always
     environment:
       - WSURL=ws://parity:8546
       - HTTPURL=http://parity:8545
       - PIPENAME=/var/spool/parity.sock
     volumes:
+      - ../parity-telemetry-log.txt:/parity-telemetry-log.txt
       - /var/spool/parity.sock:/var/spool/parity.sock
+
 EOF
 
 cat > .env << EOF
@@ -356,9 +369,34 @@ chmod 640 .env
 chmod 640 docker-compose.yml
 }
 
+appendDockerComposeNodecontrol() {
+cat >> docker-compose.yml << 'EOF'
+  nodecontrol:
+    image: energyweb/nodecontrol:${NODECONTROL_VERSION}
+    restart: always
+    entrypoint: /bin/bash
+    command:
+      -c "dotnet src.dll | tee /nodecontrol-log.txt"
+    volumes:
+      - ../nodecontrol-log.txt:/nodecontrol-log.txt
+      - $PWD:$PWD
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/nc-lastblock.txt:/lastblock.txt
+      - $PARITY_KEY_FILE:/paritykey:ro
+    environment:
+      - CONTRACT_ADDRESS=0x1204700000000000000000000000000000000007
+      - STACK_PATH=$PWD
+      - RPC_ENDPOINT=http://parity:8545
+      - VALIDATOR_ADDRESS=${VALIDATOR_ADDRESS}
+      - BLOCKFILE_PATH=/lastblock.txt
+      - KEYFILE_PATH=/paritykey
+EOF
+}
+
 writeSShConfig() {
 cat > /etc/ssh/sshd_config << EOF
 Port 2222
+PasswordAuthentication no
 PermitRootLogin no
 ChallengeResponseAuthentication no
 UsePAM yes
@@ -504,4 +542,4 @@ EOF
 chmod 644 config/parity-non-signing.toml
 }
 
-main
+main $1 $2

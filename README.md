@@ -4,9 +4,13 @@ EWC and Volta affiliate validator node installation scripts.
 
 **Keep a scratch file ready to collect outputs in - You'll need them**
 
-### Steps 
+### Steps
 
 See our Atlassian wiki for [installation instructions](https://energyweb.atlassian.net/wiki/spaces/EWF/pages/718536737/Setting+Up+a+New+Validator+Node)
+
+One can run the script with `--auto` parameter for testing (DO NOT USE FOR YOUR INSTALLATION) which can be used to take default for node-name and generate a random key.
+
+The final machine will end-up with three docker virtual machines, *parity*, *parity-telemetry* and *node-control* but in the case node-control is not needed or if the case node-control needs to be disabled from the beginning, one can run the script with the `--v-energy-validator-node` parameter.
 
 ## Shared secrets
 
@@ -42,7 +46,7 @@ The following values are considered as public keys in `.env`:
 │   │   │   └── key
 │   │   └── signer
 │   ├── config
-│   │   ├── chainspec.json 
+│   │   ├── chainspec.json
 │   │   ├── parity-non-signing.toml [Parity configuration when signing disabled by nodecontrol]
 │   │   ├── parity-signing.toml [Parity configuration when signing enabled by nodecontrol (default)]
 │   │   └── peers
@@ -58,4 +62,3 @@ Other files:
 
  - `/var/run/influxdb.sock` -> Named pipe for telegraf to write telemetry to and signer to read from.
  - `/etc/telegraf/telegraf.conf` -> Telegraf collection settings
-
